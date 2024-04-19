@@ -87,6 +87,7 @@ class Transformer(Module):
             n_heads: int = 8,
             depth: int = 8,
         ):
+            super().__init__()
             self.seq_len: int = seq_len
             self.dim: int = dim
             self.n_heads: int = n_heads
@@ -109,6 +110,7 @@ class Transformer(Module):
             n_heads: int = 8,
             depth: int = 8,
         ):
+            super().__init__()
             self.seq_len: int = seq_len
             self.dim: int = dim
             self.n_heads: int = n_heads
@@ -189,7 +191,7 @@ class Transformer(Module):
 
 
 def test():
-    transformer = Transformer()
+    transformer = Transformer(positional_embedding="learned")
     print(transformer("The PC user is thon"))
     pass
 
