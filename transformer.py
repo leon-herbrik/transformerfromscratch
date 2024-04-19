@@ -16,7 +16,7 @@ class Transformer(Module):
 
     def __init__(
         self,
-        seq_len: int = 2**16,
+        seq_len: int = 2**10,
         dim: int = 768,
         n_heads: int = 8,
         depth: int = 8,
@@ -69,7 +69,13 @@ class Transformer(Module):
 
     def forward(self, x):
         # Tokenize text.
-        x = self.tokenizer(x)
+        x = self.tokenizer(x, self.seq_len)
+        x = Tensor(x).int()
+        # Embed tokens.
+        x = self.token_embedding(x)
+        # Add positional embedding.
+        x = self.positional_embedding(x)
+
         return x
 
     class Encoder(Module):

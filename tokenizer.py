@@ -23,6 +23,7 @@ class Tokenizer:
             corpus = "\n".join(corpus)
         self.tokens = [i for i in special_tokens] if special_tokens is not None else []
         self.tokens += ["<UKN>"]
+        self.tokens += ["[MASK]"]
         self.tokens += self.extract_tokens(corpus)
         self.num_tokens = len(self.tokens)
         # Map from tokens to index of token.
@@ -54,9 +55,15 @@ class Tokenizer:
             results = results[0]
         return results
 
-    def __call__(self, x: str):
+    def __call__(self, x: str, sequence_length: int = 0):
+        """
+        @param sequence_length: Append [MASK] tokens until the list of tokens is as long as sequence_length
+        """
         tokens = self.extract_tokens(x, remove_duplicates=False)
-        return self[tokens]
+        ids = self[tokens]
+        if sequence_length > len(ids):
+            ids += [self.t_to_i["[MASK]"]] * (sequence_length - len(ids))
+        return ids
 
     def extract_tokens(self, string: str, remove_duplicates=True):
         matches = re.findall(self.r, string)
@@ -68,7 +75,7 @@ class Tokenizer:
 def test():
     with open("corpus/sentences_cleansed.txt", "r") as f:
         lines = f.readlines()
-    special_tokens = ["[MASK]", "<EOS>", "<SOS>"]
+    special_tokens = ["<EOS>", "<SOS>"]
     tokenizer: Tokenizer = Tokenizer(lines, special_tokens=special_tokens)
     for s in special_tokens:
         print(tokenizer[s], tokenizer[tokenizer[s]])
