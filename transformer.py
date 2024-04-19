@@ -27,11 +27,7 @@ class Transformer(Module):
         self.seq_len: int = seq_len
         self.dim: int = dim
         self.n_heads: int = n_heads
-        if (head_dim := (dim % n_heads)) != 0:
-            raise RuntimeError(
-                f"The dimension of the transformer needs to be divisible by the number of heads, however: {dim=} % {n_heads=} == {dim % n_heads}"
-            )
-        self.head_dim: int = head_dim
+
         self.depth: int = depth
         # The transformer consists of an encoder and a decoder.
         # The encoder is trained for each token to self-attend to the whole sequence.
@@ -76,13 +72,52 @@ class Transformer(Module):
         # Add positional embedding.
         x = self.positional_embedding(x)
 
+        print(x.size())
         return x
 
     class Encoder(Module):
-        pass
+        """
+        Encoder of the transformer. Consists of a stack of attention blocks that are specific to the encoder.
+        """
+
+        def __init__(
+            self,
+            seq_len: int = 2**10,
+            dim: int = 768,
+            n_heads: int = 8,
+            depth: int = 8,
+        ):
+            self.seq_len: int = seq_len
+            self.dim: int = dim
+            self.n_heads: int = n_heads
+            self.depth: int = depth
+            self.head_dim, rest = divmod(dim, n_heads)
+            if rest != 0:
+                raise RuntimeError(
+                    f"The embedding dimension needs to be divisible by the number of heads, however: {dim=} % {n_heads=} == {rest}"
+                )
 
     class Decoder(Module):
-        pass
+        """
+        Decoder of the transformer.
+        """
+
+        def __init__(
+            self,
+            seq_len: int = 2**10,
+            dim: int = 768,
+            n_heads: int = 8,
+            depth: int = 8,
+        ):
+            self.seq_len: int = seq_len
+            self.dim: int = dim
+            self.n_heads: int = n_heads
+            self.depth: int = depth
+            self.head_dim, rest = divmod(dim, n_heads)
+            if rest != 0:
+                raise RuntimeError(
+                    f"The embedding dimension needs to be divisible by the number of heads, however: {dim=} % {n_heads=} == {rest}"
+                )
 
     class Learned_Embedding(Module):
         """
