@@ -2,7 +2,7 @@ from typing import List, Optional
 
 import torch
 from torch import Tensor
-from torch.nn import Module, Embedding
+from torch.nn import Module, Embedding, ModuleList
 
 # Custom local imports
 from tokenizer import Tokenizer
@@ -27,14 +27,14 @@ class Transformer(Module):
         self.seq_len: int = seq_len
         self.dim: int = dim
         self.n_heads: int = n_heads
-
         self.depth: int = depth
-        # The transformer consists of an encoder and a decoder.
-        # The encoder is trained for each token to self-attend to the whole sequence.
-        self.encoder: Transformer.Encoder = self.Encoder()
-        # The decoder is trained to self-attend only to previous tokens of the sequence
-        # and cross-attend to the encoder's output.
-        self.decoder: Transformer.Decoder = self.Decoder()
+        self.head_dim, rest = divmod(dim, n_heads)
+        if rest != 0:
+            raise RuntimeError(
+                f"The embedding dimension needs to be divisible by the number of heads, however: {dim=} % {n_heads=} == {rest}"
+            )
+        self.architecture_params = (self.seq_len, self.dim, self.n_heads, self.head_dim)
+
         self.tokenizer: Tokenizer = (
             tokenizer
             if tokenizer is not None
@@ -62,6 +62,12 @@ class Transformer(Module):
                 raise NotImplementedError(
                     f'Positional embedding: {positional_embedding} is not implemented. Try "ml", "standard", or "learned".'
                 )
+        # The transformer consists of an encoder and a decoder.
+        # The encoder is trained for each token to self-attend to the whole sequence.
+        self.encoder: Transformer.Encoder = self.Encoder(self)
+        # The decoder is trained to self-attend only to previous tokens of the sequence
+        # and cross-attend to the encoder's output.
+        self.decoder: Transformer.Decoder = self.Decoder(self)
 
     def forward(self, x):
         # Tokenize text.
@@ -80,22 +86,21 @@ class Transformer(Module):
         Encoder of the transformer. Consists of a stack of attention blocks that are specific to the encoder.
         """
 
-        def __init__(
-            self,
-            seq_len: int = 2**10,
-            dim: int = 768,
-            n_heads: int = 8,
-            depth: int = 8,
-        ):
+        def __init__(self, transformer):
             super().__init__()
-            self.seq_len: int = seq_len
-            self.dim: int = dim
-            self.n_heads: int = n_heads
-            self.depth: int = depth
-            self.head_dim, rest = divmod(dim, n_heads)
-            if rest != 0:
-                raise RuntimeError(
-                    f"The embedding dimension needs to be divisible by the number of heads, however: {dim=} % {n_heads=} == {rest}"
+            self.transformer = transformer
+            self.blocks = [self.EncoderBlock(self) for i in range(transformer.depth)]
+
+        class EncoderBlock(Module):
+            """
+            One encoder block. Consists of bidirectional self-attention and feed-forward net.
+            """
+
+            def __init__(self, encoder):
+                super().__init__()
+                self.encoder = encoder
+                seq_len, dim, n_heads, head_dim = (
+                    self.encoder.transformer.architecture_params
                 )
 
     class Decoder(Module):
@@ -103,27 +108,13 @@ class Transformer(Module):
         Decoder of the transformer.
         """
 
-        def __init__(
-            self,
-            seq_len: int = 2**10,
-            dim: int = 768,
-            n_heads: int = 8,
-            depth: int = 8,
-        ):
+        def __init__(self, transformer):
             super().__init__()
-            self.seq_len: int = seq_len
-            self.dim: int = dim
-            self.n_heads: int = n_heads
-            self.depth: int = depth
-            self.head_dim, rest = divmod(dim, n_heads)
-            if rest != 0:
-                raise RuntimeError(
-                    f"The embedding dimension needs to be divisible by the number of heads, however: {dim=} % {n_heads=} == {rest}"
-                )
 
     class Learned_Embedding(Module):
         """
-        This is a learned embedding with trainable parameters. Empirically there should be no difference.
+        This is a learned positional embedding with trainable parameters. Empirically there should be no difference
+        between this and the sinusoidal one.
         """
 
         def __init__(self, dim: int, seq_len: int):
