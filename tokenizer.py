@@ -1,6 +1,8 @@
 from typing import List, Union, Optional
 import re
 
+from torch import Tensor
+
 
 class Tokenizer:
     """
@@ -20,25 +22,47 @@ class Tokenizer:
         if isinstance(corpus, list):
             corpus = "\n".join(corpus)
         self.tokens = [i for i in special_tokens] if special_tokens is not None else []
-        self.tokens += list(set(re.findall(self.r, corpus)))
+        self.tokens += ["<UKN>"]
+        self.tokens += self.extract_tokens(corpus)
         self.num_tokens = len(self.tokens)
         # Map from tokens to index of token.
         self.t_to_i = {token: i for i, token in enumerate(self.tokens)}
         # Map the other way.
         self.i_to_t = {i: token for i, token in enumerate(self.tokens)}
 
-    def __getitem__(self, item: Optional[Union[str, int]]) -> Optional[Union[str, int]]:
-        match item:
-            case int():
-                return self.i_to_t.get(item)
-            case str():
-                return self.t_to_i.get(item)
-            case None:
-                return None
-            case _:
-                raise NotImplementedError(
-                    f"__getitem__ not implemented for data type: {type(item)}"
-                )
+    def __getitem__(
+        self, items: Union[List, str, int, None]
+    ) -> List[Union[None, str, int]]:
+        if not isinstance(items, list):
+            items = [items]
+        results = []
+        for element in items:
+            match element:
+                case int():
+                    # Return stored token or <UKN> if the id is not present.
+                    results.append(self.i_to_t.get(element, "<UKN>"))
+                case str():
+                    # Return stored id or the id of <UKN> if the token is not present.
+                    results.append(self.t_to_i.get(element, self.t_to_i.get("<UKN>")))
+                case None:
+                    results.append(None)
+                case _:
+                    raise NotImplementedError(
+                        f"__getitem__ not implemented for data type: {type(element)}"
+                    )
+        if len(results) == 1:
+            results = results[0]
+        return results
+
+    def __call__(self, x: str):
+        tokens = self.extract_tokens(x, remove_duplicates=False)
+        return self[tokens]
+
+    def extract_tokens(self, string: str, remove_duplicates=True):
+        matches = re.findall(self.r, string)
+        # Use this to preserve order.
+        tokens = list(dict.fromkeys(matches)) if remove_duplicates else matches
+        return tokens
 
 
 def test():
