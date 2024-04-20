@@ -1,8 +1,19 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Union
 
 import torch
 from torch import Tensor
-from torch.nn import Module, Embedding, ModuleList
+from torch.nn import (
+    Module,
+    Embedding,
+    ModuleList,
+    ModuleDict,
+    Sequential,
+    Linear,
+    ReLU,
+    LayerNorm,
+)
+import yaml
+import dotsi
 
 # Custom local imports
 from tokenizer import Tokenizer
@@ -16,24 +27,20 @@ class Transformer(Module):
 
     def __init__(
         self,
-        seq_len: int = 2**10,
-        dim: int = 768,
-        n_heads: int = 8,
-        depth: int = 8,
+        config: Optional[Union[Dict, dotsi.Dict]] = None,
         tokenizer: Optional[Tokenizer] = None,
-        positional_embedding: str = "ml",
     ):
         super().__init__()
-        self.seq_len: int = seq_len
-        self.dim: int = dim
-        self.n_heads: int = n_heads
-        self.depth: int = depth
-        self.head_dim, rest = divmod(dim, n_heads)
+        # Dotsi implements dot notation on dictionaries, making accessing the config variables a lot clearer imo.
+        self.config = (
+            dotsi.Dict(self.default_config()) if config is None else dotsi.Dict(config)
+        )
+        config = self.config
+        config.n_heads, rest = divmod(config.dim, config.n_heads)
         if rest != 0:
             raise RuntimeError(
-                f"The embedding dimension needs to be divisible by the number of heads, however: {dim=} % {n_heads=} == {rest}"
+                f"The embedding dimension needs to be divisible by the number of heads, however: {config.dim=} % {config.n_heads=} == {rest}"
             )
-        self.architecture_params = (self.seq_len, self.dim, self.n_heads, self.head_dim)
 
         self.tokenizer: Tokenizer = (
             tokenizer
@@ -42,25 +49,21 @@ class Transformer(Module):
         )
         # We need an embedding layer that learns useful representations of each token.
         self.token_embedding: Embedding = Embedding(
-            num_embeddings=self.tokenizer.num_tokens, embedding_dim=dim
+            num_embeddings=self.tokenizer.num_tokens, embedding_dim=config.dim
         )
         # Additionally, we need a positional embedding that makes it so the transformer isn't invariant to position.
         # This means, changing the embedding of a word based on its position in the sequence.
         # There are two choices here:
         #   - Use a static embedding like sin-based as in the original paper
         #   - or a trainable one.
-        match positional_embedding:
+        match config.positional_embedding:
             case "ml" | "standard":
-                self.positional_embedding = self.Sinusoidal_Embedding(
-                    self.dim, self.seq_len, version=positional_embedding
-                )
+                self.positional_embedding = self.Sinusoidal_Embedding(config)
             case "learned":
-                self.positional_embedding = self.Learned_Embedding(
-                    dim=self.dim, seq_len=self.seq_len
-                )
+                self.positional_embedding = self.Learned_Embedding(config)
             case _:
                 raise NotImplementedError(
-                    f'Positional embedding: {positional_embedding} is not implemented. Try "ml", "standard", or "learned".'
+                    f'Positional embedding: {config.positional_embedding} is not implemented. Try "ml", "standard", or "learned".'
                 )
         # The transformer consists of an encoder and a decoder.
         # The encoder is trained for each token to self-attend to the whole sequence.
@@ -71,7 +74,7 @@ class Transformer(Module):
 
     def forward(self, x):
         # Tokenize text.
-        x = self.tokenizer(x, self.seq_len)
+        x = self.tokenizer(x, self.config.seq_len)
         x = Tensor(x).int()
         # Embed tokens.
         x = self.token_embedding(x)
@@ -86,22 +89,50 @@ class Transformer(Module):
         Encoder of the transformer. Consists of a stack of attention blocks that are specific to the encoder.
         """
 
-        def __init__(self, transformer):
+        def __init__(self, config):
             super().__init__()
-            self.transformer = transformer
-            self.blocks = [self.EncoderBlock(self) for i in range(transformer.depth)]
+            self.config = config
+            self.blocks = Sequential(
+                ModuleList([self.EncoderBlock(config) for i in range(config.depth)])
+            )
 
         class EncoderBlock(Module):
             """
-            One encoder block. Consists of bidirectional self-attention and feed-forward net.
+            One encoder block. Consists of bidirectional self-attention and feed-forward (1-hidden-layer-MLP) net.
             """
 
-            def __init__(self, encoder):
+            def __init__(self, config):
+                # TODO: Add layer norm.
                 super().__init__()
-                self.encoder = encoder
-                seq_len, dim, n_heads, head_dim = (
-                    self.encoder.transformer.architecture_params
+                self.config = config
+                self.attention = self.AttentionLayer(config)
+                self.feed_forward = Sequential(
+                    Linear(config.dim, config.dim),
+                    ReLU(),
+                    Linear(config.dim, config.dim),
                 )
+
+            def forward(self, x):
+                x = self.attention(x)
+                # Add & norm.
+                x += x
+
+                x = self.feed_forward(x)
+                # Add & norm.
+                x += x
+
+            class AttentionLayer(Module):
+                """
+                Attention layer for use in Encoder stack.
+                """
+
+                def __init(self, config):
+                    super().__init__()
+                    self.config = config
+
+                def forward(self, x):
+                    # TODO: Implement.
+                    return x
 
     class Decoder(Module):
         """
@@ -117,9 +148,11 @@ class Transformer(Module):
         between this and the sinusoidal one.
         """
 
-        def __init__(self, dim: int, seq_len: int):
+        def __init__(self, config):
             super().__init__()
-            self.embeddings = Embedding(num_embeddings=seq_len, embedding_dim=dim)
+            self.embeddings = Embedding(
+                num_embeddings=config.seq_len, embedding_dim=config.dim
+            )
 
         def forward(self, x):
             num_embeddings = self.embeddings.num_embeddings
@@ -134,10 +167,10 @@ class Transformer(Module):
         """
 
         # TODO: Test difference between standard version and ML (Mahan & Leon) version.
-        def __init__(self, dim: int, seq_len: int, version: str = "ml", n: int = 10000):
+        def __init__(self, config):
             super().__init__()
             # 10000 is the proposed constant from the paper.
-            s, d = seq_len, dim
+            s, d, n = config.seq_len, config.dim, config.sinusoidal_embedding_constant
             # Create tensor to hold the positional encodings for each position in sequence and dimension.
             # This is a matrix holding values that can be added to the actual input data embeddings.
             self.embeddings = torch.zeros(s, d)
@@ -145,7 +178,7 @@ class Transformer(Module):
             positions = torch.arange(0, s).unsqueeze(1)
 
             # Select the correct version.
-            match version:
+            match config.version:
                 case "ml":
                     # For our own, very beautiful method, we need different denominators for the even and
                     # positions in the embedding dimension.
@@ -180,9 +213,24 @@ class Transformer(Module):
         ]
         return corpus
 
+    def default_config(self) -> Dict:
+        """
+        Default config as yaml string, if no user defined config is given.
+        """
+        return yaml.safe_load(
+            """
+                seq_len: 1024,
+                dim: 768,
+                n_heads: 8,
+                depth: 8,
+                positional_embedding: 'ml'
+                sinusoidal_embedding_constant: 10000
+            """
+        )
+
 
 def test():
-    transformer = Transformer(positional_embedding="learned")
+    transformer = Transformer()
     print(transformer("The PC user is thon"))
     pass
 
