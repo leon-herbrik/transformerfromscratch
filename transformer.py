@@ -111,15 +111,31 @@ class Transformer(Module):
                     ReLU(),
                     Linear(config.dim, config.dim),
                 )
+                self.layer_norms = ModuleList(
+                    [
+                        LayerNorm(
+                            normalized_shape=(config.seq_len, config.dim)  # type:ignore
+                        ),
+                        LayerNorm(
+                            normalized_shape=(config.seq_len, config.dim)  # type:ignore
+                        ),
+                    ]
+                )
 
             def forward(self, x):
+                res_0 = x.detach().clone()
+                # First part of the block is attention and layernorm with a residual connection.
                 x = self.attention(x)
                 # Add & norm.
-                x += x
+                x = self.layer_norms[0](x + res_0)
 
+                res_1 = x.detach().clone()
+                # Second part is feed forward and layernorm with residual.
                 x = self.feed_forward(x)
                 # Add & norm.
-                x += x
+                x = self.layer_norms[1](x + res_1)
+
+                return x
 
             class AttentionLayer(Module):
                 """
